@@ -40,8 +40,9 @@ import yaml
 PIPELINE_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_DIR = PIPELINE_ROOT / "config"
 DEFAULTS_PATH = CONFIG_DIR / "defaults.yaml"
-# Not a profile -- it is the annotated template users copy, and it has placeholder paths.
+# Not profiles -- `example_*.yaml` are annotated templates users copy, with placeholder paths.
 TEMPLATE_PROFILE_NAME = "example_bop"
+TEMPLATE_PREFIX = "example_"
 CONFIG_ENV_VAR = "PERCEPTION_PIPELINE_CONFIG"
 
 
@@ -270,7 +271,7 @@ def available_profiles() -> list[str]:
     return sorted(
         path.stem
         for path in CONFIG_DIR.glob("*.yaml")
-        if path.stem not in {"defaults", TEMPLATE_PROFILE_NAME}
+        if path.stem != "defaults" and not path.stem.startswith(TEMPLATE_PREFIX)
     )
 
 

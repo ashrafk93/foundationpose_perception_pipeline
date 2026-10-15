@@ -103,6 +103,7 @@ pipeline/
     defaults.yaml            algorithm defaults (thresholds, rerank, refinement, depth)
     <dataset>.yaml           dataset profile: paths, prompts, regression datasets
     example_bop.yaml         annotated template to copy
+    example_realsense.yaml   the same, for a RealSense D4xx capture
 
   src/foundationpose_perception_pipeline/   the importable package
     config.py                YAML loading, profile resolution, typed settings
@@ -128,7 +129,7 @@ pipeline/
       refine.py                CAD box-prompt replacement of mid-quality proposals
       select.py                scoring and the rerank decision
       depth.py                 depth-BACKEND registry + the engine backend
-      source.py                depth-SOURCE registry + the predicted source
+      source.py                depth-SOURCE registry + the predicted and sensor sources
       stereo/                  FoundationStereo depth — TAO Deploy, in this venv
         tao.py                   engine load, ImageNet preprocessing, disparity
         rectify.py               pair selection + rectification
@@ -150,9 +151,11 @@ pipeline/
     run_batch_eval.py        every dataset + aggregate report
     build_gt_cache.py        precompute the GT z-buffer cache
 
-  test/                      the check that runs a model: depth on one scene, through the engine
+  test/                      the check that runs a model: depth on one scene, through the engine;
+                             and the RealSense capture-layout check, which needs neither
   tools/                     standalone CLIs: engine building, install verification, the rerank
-                             sweep, and the BOP dataset adapters under bop_adapt/
+                             sweep, the BOP dataset adapters under bop_adapt/, and the
+                             RealSense D4xx capture under realsense/
 ```
 
 Dependencies run one way, with no cycles:
@@ -389,7 +392,7 @@ All from `config/defaults.yaml`; every one is overridable per dataset via a prof
 |---|---|
 | Frame used per scene | `rgb/000000.png` |
 | SAM3 confidence threshold | `0.2` |
-| Depth source | `foundationstereo` |
+| Depth source | `foundationstereo` (`sensor` reads the capture's measured depth instead) |
 | GT min visible fraction | `0.1` (BOP convention) |
 | Pose visibility bands | `[0.0, 0.9]` |
 | Pose error threshold / rate | `5.0` mm, `0.90` (what `max_vertex_error_meets_required_rate` reports against) |

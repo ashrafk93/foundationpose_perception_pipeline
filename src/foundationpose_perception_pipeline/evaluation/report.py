@@ -691,6 +691,12 @@ def _depth_source_note(depth_source: str) -> str:
             "read from collected ground-truth depth at "
             "`<collected_depth_root>/<dataset>/<split>/<scene>/scene_cam<n>_depth.png`"
         )
+    if depth_source == "sensor":
+        return (
+            "measured by the capture device itself (e.g. a RealSense D4xx), read from "
+            "`<collected_depth_root>/<dataset>/<split>/<scene>/scene_cam<n>_depth.png`; not "
+            "predicted, so not scored for depth"
+        )
     if depth_source == "foundationstereo":
         return (
             "predicted per scene by FoundationStereo from the rectified stereo pair; the "

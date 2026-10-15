@@ -429,6 +429,7 @@ editing a `.py` file.
 | `defaults.yaml` | repo | Algorithm behaviour: thresholds, rerank, refinement, depth. Read on every run. |
 | `<dataset>.yaml` | dataset | Where the data is, what the objects are called, which dataset the checks default to (`regression.clean_dataset`), and any `overrides:`. |
 | `example_bop.yaml` | — | Annotated template. Not a profile; copy it to make one. |
+| `example_realsense.yaml` | — | The same, for a RealSense D4xx capture (§6). |
 
 ### Precedence
 
@@ -652,6 +653,115 @@ The object-name table is `config/<name>/object_names.json`, beside the profile r
 the adapter, because it is dataset metadata and the profile's `prompts:` block is keyed by the
 names in it. BOP ships numeric `obj_id`s and no names, so this table is written by hand.
 
+### Capturing with a RealSense D4xx camera
+
+A RealSense D4xx (D415, D435, D455, …) needs no adapter. Its two infrared imagers are a
+factory-calibrated stereo pair, rectified on the camera, with a horizontal baseline — 50 mm on a
+D435, 95 mm on a D455 — which is exactly what the depth stage consumes. `tools/realsense/capture.py`
+writes each saved frame as one scene in the layout above, and the pipeline runs on it unchanged:
+
+```text
+<root>/<name>/test/<scene>/rgb/000000.png         left infrared  -- the base camera, segmented by SAM3
+                          /rgb/000001.png         right infrared -- its stereo partner
+                          /scene_camera.json      factory intrinsics + left->right extrinsics (mm)
+                          /scene_cam0_depth.png   the camera's OWN depth, uint16 mm (collected depth)
+<root>/<name>/scene_index.json                         camera serial, firmware, frame, emitter state
+<root>/<name>/models/obj_<id>.ply                      your CAD meshes -- you add these (step 2)
+<root>/<name>/dataset_map.json                         {object name: obj_id} -- and this
+```
+
+The left imager is the base camera because the D4xx computes its depth in that imager's frame, so
+the camera's own depth lines up with `rgb/000000.png` pixel for pixel. The images are infrared —
+grayscale, three channels — so write SAM3 prompts that describe shape and brightness, not colour.
+`config/example_realsense.yaml` is the profile template; it keeps that depth inside each scene, so a
+capture folder is self-contained.
+
+**1. Install the SDK bindings and capture.** `pyrealsense2` is an optional extra, used only by the
+capture tool.
+
+```bash
+uv sync --inexact --extra realsense
+cp config/example_realsense.yaml config/realsense.yaml   # once
+
+# preview the infrared and depth streams; SPACE saves a scene, Q quits
+python tools/realsense/capture.py --config realsense --name my_capture --interactive
+
+# or unattended: 5 scenes, one every 15 frames
+python tools/realsense/capture.py --config realsense --name my_capture --frames 5
+
+# or from a recording with infrared 1 + 2 and depth (0 frames = the whole file);
+# RealSense SDK 2.59+ records ROS 2 .db3, older versions .bag -- --bag takes either
+python tools/realsense/capture.py --config realsense --name my_capture --bag recording.db3 --frames 0
+```
+
+`could not start the camera: No device connected` while `lsusb` lists the camera means your user
+cannot open it: install the SDK's udev rules (`99-realsense-libusb.rules`, see the RealSense SDK's
+Linux install guide) or run as root. `Couldn't resolve requests` usually means a USB 2 link, which
+carries only one infrared stream; use a USB 3 port and cable.
+
+Captures land under `dataset.root` from the profile (`../realsense_captures` beside the repo);
+`--out-root` and `--depth-root` put them elsewhere. Running it again with the same `--name` appends
+scenes rather than overwriting them.
+
+The infrared projector is **off** by default (`--emitter off`). Its dot pattern lands on the very
+image SAM3 segments, and FoundationStereo matches the scene's own texture without it. The price is
+sparser camera depth on textureless surfaces; `--emitter on` makes the opposite trade. With the
+projector off the imagers see only ambient light, so light the scene: a frame that reads dark in
+the `--interactive` preview is too dark for both SAM3 and the stereo match.
+
+**2. Add the objects to look for.** The capture tool writes images only; the CAD meshes are yours,
+in the same `models/` + `dataset_map.json` layout as any other dataset (§5, Adding a dataset):
+
+```text
+<root>/<name>/models/obj_000001.ply   binary little-endian PLY, in MILLIMETRES
+<root>/<name>/dataset_map.json        {"my_object": 1}
+```
+
+Millimetres because FoundationPose runs with `mesh_unit_scale=0.001` here; a mesh in metres is
+1000x too small and fails without an error. `python tools/bop_adapt/ply.py <src dir> <dst dir>`
+converts ASCII PLYs to binary (it does not rescale). `models_info.json` is needed only by
+`evaluate.py`, which a capture without annotations cannot use anyway.
+
+**3. Build a depth engine** from one captured scene, and point the profile's `engine:` at it (§2.4):
+
+```bash
+python tools/build_tao_engine.py --config realsense \
+    --onnx ../models/deployable_foundation_stereo_s_dynamic.onnx \
+    --shape-from-scene ../realsense_captures/my_capture/test/000000 --precision fp32
+```
+
+The shape follows the capture resolution, so rebuild if you change `capture.py --width/--height`.
+
+**4. Run inference.** A capture has no annotations, so name the objects with `--objects`:
+
+```bash
+python script/infer.py --config realsense --dataset my_capture --objects my_object \
+    --output-dir output/my_capture
+```
+
+Poses are in `output/my_capture/predictions.jsonl` (`pose_row_major`, camera-0 frame, metres) and
+drawn under `output/my_capture/overlays/`.
+
+**5. Compare against the camera's own depth.** The same frames and masks, with FoundationPose fed
+the D4xx's depth instead of FoundationStereo's:
+
+```bash
+python script/infer.py --config realsense --dataset my_capture --objects my_object \
+    --depth-source sensor --output-dir output/my_capture_sensor
+```
+
+`--depth-source sensor` reads `scene_cam0_depth.png` — any capture that ships measured depth
+registered to camera 0 can use it, not only a RealSense. It is a measurement, not ground truth, so
+`evaluate.py` does not score depth for such a run. Scoring poses needs `scene_gt.json`, which a
+fresh capture does not have; add annotations to the scenes to use `evaluate.py` on them.
+
+Check a capture without a camera or a GPU — this writes a synthetic D455 scene and runs the depth
+stage's own pairing, rectification and sensor-source code over it:
+
+```bash
+python test/check_realsense_layout.py
+```
+
 ---
 
 ## 7. Running
@@ -677,6 +787,8 @@ cuDNN from the wheels above, and a foreign copy on the path is what makes it die
 | No collected depth on this machine | `... --no-depth-metrics` |
 | All datasets + aggregate | `python script/run_batch_eval.py --config <name>` |
 | Inference only, no ground truth | `python script/infer.py --dataset <name> --output-dir <run>` |
+| Capture from a RealSense D4xx | `python tools/realsense/capture.py --config realsense --name <name> --interactive` (§6) |
+| Pose on the camera's own depth | `... --depth-source sensor` (reads the collected depth; no depth engine) |
 | Re-score a finished run | `python script/evaluate.py --dataset <name> --run <run>` |
 
 `run_pipeline.py` is an orchestrator over the last two: it runs `infer.py`'s inference pass and
