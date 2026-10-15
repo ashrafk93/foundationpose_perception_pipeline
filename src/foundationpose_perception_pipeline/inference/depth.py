@@ -28,6 +28,7 @@ caller that is not a CLI -- a service, a test -- ask for depth.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -202,6 +203,19 @@ def resolve_backend(model: Path | str | None, requested: str = AUTO_BACKEND) -> 
     return actual
 
 
+def _is_predicted_cache(depth_dir: Path) -> bool:
+    """Whether `depth_dir` holds a finished prediction, rather than nothing or a measured copy.
+
+    A source that copies measured depth (see `inference/source.py`) writes the same two files and
+    marks them with `depth_source`; reusing those here would pass a sensor map off as predicted.
+    """
+    try:
+        metadata = json.loads((depth_dir / "metadata.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return "depth_source" not in metadata
+
+
 def generate_scene_depth(
     *,
     scene_dir: Path,
@@ -223,7 +237,7 @@ def generate_scene_depth(
     settings this module has never heard of.
     """
     depth_path = depth_dir / "depth_m.npy"
-    if depth_path.exists() and (depth_dir / "metadata.json").exists() and not overwrite:
+    if depth_path.exists() and _is_predicted_cache(depth_dir) and not overwrite:
         return depth_path
 
     chosen = registered_backends()[resolve_backend(model, backend)]

@@ -61,6 +61,9 @@ dependencies = [
 # Markdown -> HTML, for turning a sweep's `report.md` files into one bundled document. Nothing
 # on the pipeline's own path imports it, so this stays optional.
 report = ["markdown>=3.5"]
+# RealSense SDK bindings, for `tools/realsense/capture.py` only: the pipeline reads what the
+# capture writes and never imports this. 2.56 is the first release with cp312 wheels.
+realsense = ["pyrealsense2>=2.56"]
 # Pinned exactly, not floored. ruff's DEFAULT rule set moves between releases, so an unbounded
 # specifier silently changes the verdict: measured on this tree, ruff 0.6.0 reports 1 finding
 # and 0.16.2 reports 153, with no code change. `[tool.ruff.lint] select` below fixes *which*

@@ -1,0 +1,61 @@
+# Template profile for captures from a RealSense D4xx stereo camera (D415, D435, D455, ...).
+# Like example_bop.yaml it is not a profile until copied, so it never makes `--config` ambiguous:
+#
+#   cp config/example_realsense.yaml config/realsense.yaml
+#   python tools/realsense/capture.py --config realsense --name my_capture --interactive
+#   # add models/obj_000001.ply (mm) + dataset_map.json {"my_object": 1}, see README.md section 6
+#   python script/infer.py --config realsense --dataset my_capture --objects my_object \
+#       --output-dir output/my_capture
+#
+# A D4xx needs no adapter: its two infrared imagers are a factory-calibrated, on-camera rectified
+# stereo pair, so the capture tool writes them straight into the layout below as cameras 0 and 1
+# and the shipped FoundationStereo path runs unchanged. README.md section 6 has the walkthrough.
+#
+# The images are INFRARED, i.e. grayscale replicated to three channels. SAM3 segments them, so
+# prompts should describe shape and brightness rather than colour.
+
+dataset:
+  name: realsense
+  # Captures go here, one subfolder per `capture.py --name`.
+  root: ../../realsense_captures
+  glob: "*"
+  split: test
+  base_camera_id: 0
+  # You add the meshes: <root>/<name>/models/obj_<id:06d>.ply, binary little-endian, millimetres.
+  models_subdir: models
+  models_eval_subdir: models
+  # The camera's OWN depth, written by the capture tool for every scene. The same root as the
+  # captures on purpose: scene_cam0_depth.png then sits inside each scene, so a capture folder is
+  # self-contained and can be copied as one. It is a measurement, NOT ground truth -- see
+  # `--depth-source sensor` in README.md for what it is used for.
+  collected_depth_root: ../../realsense_captures
+  gt_cache_root: ../gt_cache
+
+output:
+  root: ../output
+  batch_subdir: batch_realsense
+
+# SAM3 text prompts, keyed by the object names in `dataset_map.json`. An object not listed
+# falls back to its name with underscores replaced by spaces.
+prompts:
+  {}
+
+regression:
+  clean_dataset: null
+  clean_scenes: 8
+  occluded_dataset: null
+  occluded_scenes: 8
+
+overrides:
+  depth:
+    # Build once per machine from a captured scene (run from the repo root), then uncomment:
+    #   python tools/build_tao_engine.py --onnx ../models/deployable_foundation_stereo_s_dynamic.onnx \
+    #       --shape-from-scene ../realsense_captures/<name>/test/000000 --precision fp32
+    # engine: ../../models/<the .engine path printed above>   # relative to THIS file
+    #
+    # A D4xx baseline is short (50 mm D435, 95 mm D455), so disparity stays far inside the
+    # model's 416 px range at tabletop distances and the pre-shift never fires: at 800 px wide a
+    # D455 needs ~128 px at 0.3 m. The bounds are kept as a description of the working volume;
+    # set them to yours.
+    min_working_distance_m: 0.3
+    max_working_distance_m: 1.5

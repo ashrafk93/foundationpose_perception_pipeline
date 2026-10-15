@@ -499,6 +499,8 @@ def run_inference(args: argparse.Namespace) -> Path:
                 "rerank_cutoff": args.rerank_cutoff,
                 "rerank_formula": inference_config.selection.formula_text(),
                 "confidence_threshold": args.confidence_threshold,
+                # Read back by evaluate.py, so the report names the source this run really used.
+                "depth_source": args.depth_source,
                 "foundation_stereo_model": str(args.foundation_stereo_model) if args.foundation_stereo_model else None,
                 "foundation_stereo_max_width": args.foundation_stereo_max_width,
                 "runtime_sec_total": sum(row["runtime_sec"] for row in runtime_rows),

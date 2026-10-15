@@ -69,6 +69,19 @@ from foundationpose_perception_pipeline.evaluation.report import (  # noqa: E402
     PipelineReportConfig,
     write_pipeline_outputs,
 )
+from foundationpose_perception_pipeline.inference.source import (  # noqa: E402
+    PREDICTED_SOURCE,
+    registered_sources,
+)
+
+
+def recorded_depth_source(run_dir: Path) -> str:
+    """The depth source inference recorded for this run; older runs did not record one and predicted."""
+    try:
+        recorded = json.loads((run_dir / "inference_config.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return PREDICTED_SOURCE
+    return str(recorded.get("depth_source") or PREDICTED_SOURCE)
 
 
 class _PoseOnlyResult:
@@ -345,8 +358,12 @@ def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
     # whose directory is absent -- depth scoring is skipped and the summaries are written empty,
     # which is what `--no-depth-metrics` does too.
     collected_dataset_dir = args.collected_root / args.dataset if args.collected_root else None
+    run_depth_source = recorded_depth_source(run_dir)
+    recorded_source = registered_sources().get(run_depth_source)
+    depth_scoring_meaningful = recorded_source is None or recorded_source.depth_metrics_meaningful
     depth_metrics_enabled = (
         not args.no_depth_metrics
+        and depth_scoring_meaningful
         and collected_dataset_dir is not None
         and collected_dataset_dir.exists()
     )
@@ -358,6 +375,9 @@ def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
     if not depth_metrics_enabled:
         if args.no_depth_metrics:
             why = "--no-depth-metrics was passed"
+        elif not depth_scoring_meaningful:
+            why = (f"this run took its depth from --depth-source {run_depth_source}, i.e. from the "
+                   "collected tree itself, so there is nothing independent to score it against")
         elif collected_dataset_dir is None:
             why = ("no collected-depth root is configured: set `dataset.collected_depth_root` in "
                    "the config profile, or pass --collected-root")
@@ -393,7 +413,7 @@ def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
             row.update(
                 {
                     "scene_id": scene_id,
-                    "depth_source": "foundationstereo",
+                    "depth_source": run_depth_source,
                     "comparison_mode": row["comparison_mode"],
                     "left_camera": int(metadata.get("left_camera", 0)),
                     "right_camera": right_camera,
@@ -438,7 +458,7 @@ def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
     config = PipelineReportConfig(
         dataset=args.dataset,
         confidence_threshold=settings.detection.sam3_confidence_threshold,
-        depth_source="foundationstereo",
+        depth_source=run_depth_source,
         min_visible_fraction=args.min_visible_fraction,
         pose_match_threshold=args.pose_match_threshold,
         sam3_refinement_policy=settings.refinement.policy,
